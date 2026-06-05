@@ -9,6 +9,20 @@ st.markdown(''' > "I had the worst flight ever. All the flight attendants were r
             ''', text_alignment="center")
 st.markdown("This should come out as :red[negative]. Give your ideas a try!")
 
+MODEL_OPTIONS = {
+    "Fine-tuned airline review model": "fine_tuned",
+    "Pretrained DistilBERT base model": "pretrained_base",
+    "Prebuilt sentiment model (SST-2)": "sentiment_pretrained",
+}
+
+selected_model_label = st.selectbox(
+    "Choose a model for sentiment evaluation:",
+    list(MODEL_OPTIONS.keys()),
+    index=0,
+)
+selected_model_key = MODEL_OPTIONS[selected_model_label]
+st.caption(f"Selected model: {selected_model_label}")
+
 # Text box for user input
 review_txt = st.text_area(
     "Your Review:",
@@ -21,8 +35,7 @@ if st.button("Submit"):
     if review_txt.strip() == "":
         st.warning("Please type something first.")
     else:
-        api_url = "http://127.0.0.1:8000/predict/sentiment"
-        # JSON Structure for Pydantic BaseModel
+        api_url = f"http://127.0.0.1:8000/predict/sentiment?model_name={selected_model_key}"
         payload = {"review_text": review_txt}
 
         try:
@@ -32,13 +45,15 @@ if st.button("Submit"):
                 data = response.json()
                 label = data['prediction']
                 score = data['confidence_score']
+                model_used = data.get('selected_model', selected_model_label)
 
+                st.success(f"Using model: {model_used}")
                 col1, col2 = st.columns(2)
                 col1.metric("Sentiment", label)
                 col2.metric("Confidence", f"{score}")
-            else: 
+            else:
                 st.write(f"API Returned error: {response.text}")
-        
+
         except requests.exceptions.RequestException as e:
             st.error(f"Request failed: {e}")
 
@@ -76,43 +91,51 @@ def render_dict(data_dict):
     st.markdown(html_content, unsafe_allow_html=True)
 with st.expander("What does the classifier architecture look like?"):
 
-    response = requests.get("http://127.0.0.1:8000/model/info")
-    model_data = response.json()["data"]
-    model_data_minimalistic = {
-        # Base transformer parameters
-        "model_type": model_data.get("model_type"),
-        "number_of_layers": model_data.get("n_layers"),
-        "number_of_heads": model_data.get("n_heads"),
-        "dimensions": model_data.get("dim"),
-        "hidden_dimensions": model_data.get("hidden_dim"),
-        "activation_function": model_data.get("activation"),
-        "dropout": model_data.get("dropout"),
-        "attention_dropout": model_data.get("attention_dropout"),
-        "vocab_size": model_data.get("vocab_size"),
-        "maximum_sequence_length": model_data.get("max_position_embeddings"),
-        
-        # Classification head & task parameters
-        "architecture": model_data.get("architectures")[0] if model_data.get("architectures") else None,
-        "problem_type": model_data.get("problem_type"),
-        "sequence_classification_dropout": model_data.get("seq_classif_dropout"),
-        "padding_token_id": model_data.get("pad_token_id"),
-        "id_to_label": model_data.get("id2label")
-    }
-    
-    
-    st.write("""
-             This architecture uses a base transformer model paired with a 
-             task-specific sequence classification head. Input text is tokenized 
-             and passed through a series of transformer layers to build a 
-             contextual understanding of the sequence (aka the text). Once the 
-             model has this representation, it forms a single summary vector. 
-             It then applies a dropout step to prevent overfitting the training data, 
-             and passes that vector through a final layer to output the predicted 
-             class probabilities."
-             """)
-    st.write("Below are the core technical specifications and structural parameters of this fine-tuned model:  ")
+    info_url = f"http://127.0.0.1:8000/model/info?model_name={selected_model_key}"
+    response = requests.get(info_url)
+    if response.status_code == 200:
+        model_data = response.json()["data"]
+    else:
+        st.error(f"Unable to load model info: {response.text}")
+        model_data = {}
 
-    render_dict(model_data_minimalistic)
+    if model_data:
+        model_data_minimalistic = {
+            # Base transformer parameters
+            "model_type": model_data.get("model_type"),
+            "number_of_layers": model_data.get("n_layers"),
+            "number_of_heads": model_data.get("n_heads"),
+            "dimensions": model_data.get("dim"),
+            "hidden_dimensions": model_data.get("hidden_dim"),
+            "activation_function": model_data.get("activation"),
+            "dropout": model_data.get("dropout"),
+            "attention_dropout": model_data.get("attention_dropout"),
+            "vocab_size": model_data.get("vocab_size"),
+            "maximum_sequence_length": model_data.get("max_position_embeddings"),
+            
+            # Classification head & task parameters
+            "architecture": model_data.get("architectures")[0] if model_data.get("architectures") else None,
+            "problem_type": model_data.get("problem_type"),
+            "sequence_classification_dropout": model_data.get("seq_classif_dropout"),
+            "padding_token_id": model_data.get("pad_token_id"),
+            "id_to_label": model_data.get("id2label")
+        }
+        
+        st.write("""
+                 This architecture uses a base transformer model paired with a 
+                 task-specific sequence classification head. Input text is tokenized 
+                 and passed through a series of transformer layers to build a 
+                 contextual understanding of the sequence (aka the text). Once the 
+                 model has this representation, it forms a single summary vector. 
+                 It then applies a dropout step to prevent overfitting the training data, 
+                 and passes that vector through a final layer to output the predicted 
+                 class probabilities."
+                 """)
+        st.write("Below are the core technical specifications and structural parameters of this fine-tuned model:  ")
+
+        render_dict(model_data_minimalistic)
+    else:
+        st.warning("Model information is unavailable at this time.")
     
     # The longer version of model_data is formatted as such:
 
